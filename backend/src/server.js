@@ -4,7 +4,7 @@ const http          = require('http');
 const { Server }    = require('socket.io');
 const cors          = require('cors');
 const jwt           = require('jsonwebtoken');
-const { initDb, get, chats } = require('./config/db');
+const { initDb, get, query, run, chats } = require('./config/db');
 const errorHandler  = require('./middlewares/errorHandler');
 const {
   authRouter, weatherRouter, moodRouter,
@@ -43,30 +43,67 @@ io.on('connection', socket => {
   socket.join(`user:${userId}`);
 
   socket.on('join_chat', ({ chatId }) => {
-    const chat = chats[chatId];
-    if (!chat) return socket.emit('error', { message: 'Chat not found' });
-    if (chat.user_a_id !== userId && chat.user_b_id !== userId)
-      return socket.emit('error', { message: 'Unauthorized' });
-    if (new Date(chat.expires_at) < new Date()) return socket.emit('chat_expired');
+    // Vérifie dans companion_requests que ce chat appartient à cet user
+    const req = get(
+      `SELECT * FROM companion_requests WHERE chat_id = ? AND (sender_id = ? OR receiver_id = ?)`,
+      [chatId, userId, userId]
+    );
+    if (!req) return socket.emit('error', { message: 'Chat not found' });
+
+    // Vérifie expiration (4h après création)
+    const createdAt  = new Date(req.created_at);
+    const expires_at = new Date(createdAt.getTime() + 4 * 60 * 60 * 1000).toISOString();
+    if (new Date(expires_at) < new Date()) return socket.emit('chat_expired');
+
     socket.join(`chat:${chatId}`);
-    socket.emit('chat_history', { messages: chat.messages, expires_at: chat.expires_at, activity: chat.activity });
+
+    // Charge les messages depuis SQLite
+    const messages = query(
+      'SELECT * FROM chat_messages WHERE chat_id = ? ORDER BY created_at ASC',
+      [chatId]
+    );
+
+    socket.emit('chat_history', {
+      messages,
+      expires_at,
+      activity: req.activity,
+    });
   });
 
   socket.on('send_message', ({ chatId, text }) => {
-    const chat = chats[chatId];
-    if (!chat || (chat.user_a_id !== userId && chat.user_b_id !== userId)) return;
-    if (new Date(chat.expires_at) < new Date()) return socket.emit('chat_expired');
+    const req = get(
+      `SELECT * FROM companion_requests WHERE chat_id = ? AND (sender_id = ? OR receiver_id = ?)`,
+      [chatId, userId, userId]
+    );
+    if (!req) return;
+
+    const createdAt  = new Date(req.created_at);
+    const expires_at = new Date(createdAt.getTime() + 4 * 60 * 60 * 1000);
+    if (expires_at < new Date()) return socket.emit('chat_expired');
     if (!text?.trim()) return;
+
     const user = get('SELECT username FROM users WHERE id = ?', [userId]);
-    const msg  = { id: Date.now(), user_id: userId, username: user?.username || '?', text: text.trim().slice(0, 500), created_at: new Date().toISOString() };
-    chat.messages.push(msg);
+    const msg  = {
+      id:         Date.now(),
+      chat_id:    chatId,
+      user_id:    userId,
+      username:   user?.username || '?',
+      text:       text.trim().slice(0, 500),
+      created_at: new Date().toISOString(),
+    };
+
+    // Sauvegarde dans SQLite
+    run(
+      'INSERT INTO chat_messages (chat_id, user_id, username, text, created_at) VALUES (?,?,?,?,?)',
+      [chatId, userId, msg.username, msg.text, msg.created_at]
+    );
+
     io.to(`chat:${chatId}`).emit('new_message', msg);
   });
 });
 
 app.set('io', io);
 
-// Démarrage — initialiser la BDD avant de lancer le serveur
 initDb().then(() => {
   server.listen(PORT, () => console.log(`✅ WeatherTime backend running on http://localhost:${PORT}`));
 }).catch(err => {

@@ -47,6 +47,14 @@ async function initDb() {
       chat_id     TEXT,
       created_at  TEXT DEFAULT (datetime('now'))
     );
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_id    TEXT NOT NULL,
+      user_id    INTEGER NOT NULL,
+      username   TEXT NOT NULL,
+      text       TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
     CREATE TABLE IF NOT EXISTS reports (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
       reporter_id INTEGER NOT NULL,
@@ -76,7 +84,6 @@ function query(sql, params = []) {
 
 function run(sql, params = []) {
   db.run(sql, params);
-  // Récupère le dernier ID inséré
   const result = db.exec('SELECT last_insert_rowid()');
   const lastId = result[0]?.values[0][0] ?? null;
   save();
@@ -84,8 +91,7 @@ function run(sql, params = []) {
 }
 
 function get(sql, params = []) {
-  const rows = query(sql, params);
-  return rows[0] || null;
+  return query(sql, params)[0] || null;
 }
 
 module.exports = { initDb, query, run, get, save, chats };
