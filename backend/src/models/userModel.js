@@ -7,11 +7,12 @@ module.exports = {
     return get('SELECT id,username,email,avatar_url,bio,created_at FROM users WHERE id = ?', [id]);
   },
   create({ username, email, password_hash }) {
-    const id = run(
+    const lastId = run(
       'INSERT INTO users (username,email,password_hash) VALUES (?,?,?)',
       [username, email, password_hash]
     );
-    return this.findById(id);
+    if (!lastId) return null;
+    return get('SELECT id,username,email,avatar_url,bio,created_at FROM users WHERE id = ?', [lastId]);
   },
   update(id, fields) {
     const keys   = Object.keys(fields);
