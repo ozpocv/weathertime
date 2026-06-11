@@ -3,12 +3,13 @@ import { api } from '../services/api';
 import { getSocket } from '../services/socket';
 
 export function useCompanion(coords, isLoggedIn) {
-  const [suggestion,     setSuggestion]     = useState(null);
-  const [companionIndex, setCompanionIndex] = useState(0);
-  const [pending,        setPending]        = useState([]);
-  const [activeChat,     setActiveChat]     = useState(null);
-  const [loading,        setLoading]        = useState(false);
-  const pollRef = useRef(null);
+  const [suggestion, setSuggestion] = useState(null);
+  const [pending,    setPending]    = useState([]);
+  const [activeChat, setActiveChat] = useState(null);
+  const [chatMinimized, setChatMinimized] = useState(false);
+  const [loading,    setLoading]    = useState(false);
+  const pollRef    = useRef(null);
+  const activeChatRef = useRef(null); // pour garder le chatId même si le composant re-render
 
   const findCompanion = useCallback(async (index = 0) => {
     if (!isLoggedIn || !coords?.lat) return;
@@ -16,7 +17,6 @@ export function useCompanion(coords, isLoggedIn) {
     try {
       const result = await api.findCompanion(coords.lat, coords.lng, index);
       setSuggestion(result);
-      if (result) setCompanionIndex(result.index ?? index);
     } catch {}
     finally { setLoading(false); }
   }, [coords, isLoggedIn]);
@@ -51,18 +51,66 @@ export function useCompanion(coords, isLoggedIn) {
   function openChat(chatId, partnerName, activity) {
     const socket = getSocket();
     if (!socket) return;
+
+    // Sauvegarde le chat actif pour pouvoir le rouvrir
+    activeChatRef.current = { chatId, partnerName, activity };
+
     socket.emit('join_chat', { chatId });
+
     socket.once('chat_history', ({ messages, expires_at }) => {
+      // Vérifie si le chat n'est pas expiré
+      if (new Date(expires_at) < new Date()) {
+        activeChatRef.current = null;
+        return;
+      }
       setActiveChat({ chatId, messages, expires_at, activity, partnerName });
+      setChatMinimized(false);
     });
+
     socket.on('new_message', (msg) => {
-      setActiveChat(prev => prev?.chatId === chatId
-        ? { ...prev, messages: [...prev.messages, msg] } : prev);
+      setActiveChat(prev => {
+        if (prev?.chatId === chatId) {
+          // Si chat minimisé, on le rouvre automatiquement
+          setChatMinimized(false);
+          return { ...prev, messages: [...prev.messages, msg] };
+        }
+        return prev;
+      });
     });
+
     socket.once('chat_expired', () => {
       setActiveChat(prev => prev?.chatId === chatId ? { ...prev, expired: true } : prev);
+      activeChatRef.current = null;
     });
   }
+
+  // Rouvrir un chat minimisé
+  const reopenChat = useCallback(() => {
+    if (activeChat) {
+      setChatMinimized(false);
+      return;
+    }
+    // Si on a perdu l'état mais qu'on a le chatId, rejoindre à nouveau
+    if (activeChatRef.current) {
+      openChat(
+        activeChatRef.current.chatId,
+        activeChatRef.current.partnerName,
+        activeChatRef.current.activity
+      );
+    }
+  }, [activeChat]);
+
+  const minimizeChat = useCallback(() => setChatMinimized(true), []);
+
+  const closeChat = useCallback(() => {
+    setChatMinimized(true); // minimise au lieu de fermer définitivement
+  }, []);
+
+  const dismissChat = useCallback(() => {
+    setActiveChat(null);
+    activeChatRef.current = null;
+    setChatMinimized(false);
+  }, []);
 
   const sendMessage = useCallback((text) => {
     const socket = getSocket();
@@ -70,25 +118,40 @@ export function useCompanion(coords, isLoggedIn) {
     socket.emit('send_message', { chatId: activeChat.chatId, text });
   }, [activeChat]);
 
-  const closeChat = useCallback(() => setActiveChat(null), []);
-
   useEffect(() => {
     if (!isLoggedIn) return;
+
     loadPending();
+    pollRef.current = setInterval(loadPending, 10000);
+
+    const onFocus = () => loadPending();
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) loadPending();
+    });
+
     const socket = getSocket();
-    if (socket) socket.on('companion_request', req => setPending(p => [...p, req]));
-    pollRef.current = setInterval(loadPending, 15000);
+    if (socket) {
+      socket.on('companion_request', req => setPending(p => [...p, req]));
+      socket.on('companion_accepted', ({ chat_id, activity, partner_name }) => {
+        openChat(chat_id, partner_name, activity);
+      });
+    }
+
     return () => {
       clearInterval(pollRef.current);
+      window.removeEventListener('focus', onFocus);
       socket?.off('companion_request');
+      socket?.off('companion_accepted');
       socket?.off('new_message');
     };
   }, [isLoggedIn, loadPending]);
 
   return {
-    suggestion, pending, activeChat, loading,
+    suggestion, pending, activeChat, chatMinimized, loading,
     findCompanion, nextCompanion,
     sendRequest, accept, decline,
-    sendMessage, closeChat,
+    sendMessage, closeChat, reopenChat, minimizeChat, dismissChat,
+    hasActiveChat: !!(activeChat || activeChatRef.current),
   };
 }
