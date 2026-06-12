@@ -1,25 +1,38 @@
-const { query, run, get } = require('../config/db');
+const mongoose = require('mongoose');
+
+const userSchema = new mongoose.Schema({
+  username:      { type: String, required: true, unique: true },
+  email:         { type: String, required: true, unique: true },
+  password_hash: { type: String, required: true },
+  avatar_url:    { type: String, default: null },
+  bio:           { type: String, default: null },
+}, { timestamps: true });
+
+const User = mongoose.model('User', userSchema);
 
 module.exports = {
-  findByEmail:    email    => get('SELECT * FROM users WHERE email = ?', [email]),
-  findByUsername: username => get('SELECT * FROM users WHERE username = ?', [username]),
-  findById(id) {
-    return get('SELECT id,username,email,avatar_url,bio,created_at FROM users WHERE id = ?', [id]);
+  async findByEmail(email)       { return User.findOne({ email }).lean(); },
+  async findByUsername(username) { return User.findOne({ username }).lean(); },
+  async findById(id) {
+    const u = await User.findById(id).lean();
+    if (!u) return null;
+    const { password_hash, __v, ...safe } = u;
+    safe.id = safe._id;
+    return safe;
   },
-  create({ username, email, password_hash }) {
-    const lastId = run(
-      'INSERT INTO users (username,email,password_hash) VALUES (?,?,?)',
-      [username, email, password_hash]
-    );
-    if (!lastId) return null;
-    return get('SELECT id,username,email,avatar_url,bio,created_at FROM users WHERE id = ?', [lastId]);
+  async create({ username, email, password_hash }) {
+    const user = await User.create({ username, email, password_hash });
+    const obj  = user.toObject();
+    const { password_hash: _, __v, ...safe } = obj;
+    safe.id = safe._id;
+    return safe;
   },
-  update(id, fields) {
-    const keys   = Object.keys(fields);
-    const values = Object.values(fields);
-    const set    = keys.map(k => `${k} = ?`).join(', ');
-    run(`UPDATE users SET ${set} WHERE id = ?`, [...values, id]);
-    return this.findById(id);
+  async update(id, fields) {
+    const user = await User.findByIdAndUpdate(id, fields, { new: true }).lean();
+    if (!user) return null;
+    const { password_hash, __v, ...safe } = user;
+    safe.id = safe._id;
+    return safe;
   },
-  delete: id => run('DELETE FROM users WHERE id = ?', [id]),
+  async delete(id) { await User.findByIdAndDelete(id); },
 };

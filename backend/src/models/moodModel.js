@@ -1,4 +1,17 @@
-const { query, run, get } = require('../config/db');
+const mongoose = require('mongoose');
+
+const moodSchema = new mongoose.Schema({
+  user_id:    { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  username:   { type: String },
+  mood:       { type: String, enum: ['happy','chill','tired','sporty'], required: true },
+  activity:   { type: String, required: true },
+  status:     { type: String, enum: ['open','quiet'], required: true },
+  lat:        { type: Number, required: true },
+  lng:        { type: Number, required: true },
+  expires_at: { type: Date, required: true },
+}, { timestamps: true });
+
+const Mood = mongoose.model('Mood', moodSchema);
 
 function haversine(lat1, lng1, lat2, lng2) {
   const R = 6371, d2r = Math.PI / 180;
@@ -8,39 +21,31 @@ function haversine(lat1, lng1, lat2, lng2) {
 }
 
 module.exports = {
-  create({ user_id, mood, activity, status, lat, lng, expires_at }) {
-    run('DELETE FROM moods WHERE user_id = ?', [user_id]);
-    const id = run(
-      'INSERT INTO moods (user_id,mood,activity,status,lat,lng,expires_at) VALUES (?,?,?,?,?,?,?)',
-      [user_id, mood, activity, status, lat, lng, expires_at]
-    );
-    return get('SELECT * FROM moods WHERE id = ?', [id]);
+  async create({ user_id, username, mood, activity, status, lat, lng, expires_at }) {
+    await Mood.deleteMany({ user_id });
+    const m = await Mood.create({ user_id, username, mood, activity, status, lat, lng, expires_at });
+    return m.toObject();
   },
 
-  findNearby({ lat, lng, radiusKm = 5, excludeUserId }) {
-    const now  = new Date().toISOString();
-    const rows = query(
-      `SELECT m.*, u.username, u.avatar_url
-       FROM moods m JOIN users u ON u.id = m.user_id
-       WHERE m.expires_at > ? AND m.user_id != ?`,
-      [now, excludeUserId]
-    );
+  async findNearby({ lat, lng, radiusKm = 5, excludeUserId }) {
+    const rows = await Mood.find({
+      expires_at: { $gt: new Date() },
+      user_id:    { $ne: excludeUserId },
+    }).lean();
+
     return rows
-      .map(m => ({ ...m, distance_km: haversine(lat, lng, m.lat, m.lng) }))
+      .map(m => ({ ...m, id: m._id, distance_km: haversine(lat, lng, m.lat, m.lng) }))
       .filter(m => m.distance_km <= radiusKm)
       .sort((a, b) => a.distance_km - b.distance_km)
       .slice(0, 20);
   },
 
-  findByUser(user_id) {
-    const now = new Date().toISOString();
-    return get('SELECT * FROM moods WHERE user_id = ? AND expires_at > ?', [user_id, now]);
+  async findByUser(user_id) {
+    return Mood.findOne({ user_id, expires_at: { $gt: new Date() } }).lean();
   },
 
-  delete(id, user_id) {
-    const before = query('SELECT id FROM moods WHERE id = ? AND user_id = ?', [id, user_id]);
-    if (!before.length) return false;
-    run('DELETE FROM moods WHERE id = ? AND user_id = ?', [id, user_id]);
-    return true;
+  async delete(id, user_id) {
+    const res = await Mood.findOneAndDelete({ _id: id, user_id });
+    return !!res;
   },
 };

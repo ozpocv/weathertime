@@ -25,25 +25,24 @@ function commonActivity(mA, mB) {
 }
 
 module.exports = {
-  findCompatible({ user_id, lat, lng, radiusKm = 5, index = 0 }) {
-    const myMood = MoodModel.findByUser(user_id);
+  async findCompatible({ user_id, lat, lng, radiusKm = 5, index = 0 }) {
+    const myMood = await MoodModel.findByUser(user_id);
     if (!myMood) return null;
 
-    const nearby     = MoodModel.findNearby({ lat, lng, radiusKm, excludeUserId: user_id });
+    const nearby     = await MoodModel.findNearby({ lat, lng, radiusKm, excludeUserId: user_id });
     const compatible = COMPAT[myMood.mood] || [];
-    const pending    = CompanionModel.findPendingForUser(user_id);
-    const pendingIds = new Set(pending.map(r => r.sender_id));
+    const pending    = await CompanionModel.findPendingForUser(user_id);
+    const pendingIds = new Set(pending.map(r => r.sender_id?.toString()));
 
     const candidates = nearby.filter(m =>
-      compatible.includes(m.mood) && !pendingIds.has(m.user_id)
+      compatible.includes(m.mood) && !pendingIds.has(m.user_id?.toString())
     );
 
     if (!candidates.length) return null;
 
-    // index cyclique — si on dépasse la fin on revient au début
     const safeIndex = index % candidates.length;
     const c         = candidates[safeIndex];
-    const cUser     = UserModel.findById(c.user_id);
+    const cUser     = await UserModel.findById(c.user_id);
 
     return {
       user_id:            c.user_id,
@@ -58,35 +57,50 @@ module.exports = {
     };
   },
 
-  sendRequest({ sender_id, receiver_id, activity, mood }) {
-    const req = CompanionModel.create({ sender_id, receiver_id, activity, mood });
+  async sendRequest({ sender_id, receiver_id, activity, mood }) {
+    const req = await CompanionModel.create({ sender_id, receiver_id, activity, mood });
     if (!req) { const e = new Error('Request already exists'); e.status = 409; throw e; }
     return req;
   },
 
-  getPending: user_id => CompanionModel.findPendingForUser(user_id),
+  async getPending(user_id) { return CompanionModel.findPendingForUser(user_id); },
 
-  accept(request_id, user_id) {
-    const req = CompanionModel.findById(request_id);
+  async accept(request_id, user_id) {
+    const req = await CompanionModel.findById(request_id);
     if (!req) { const e = new Error('Request not found'); e.status = 404; throw e; }
-    if (req.receiver_id !== user_id) { const e = new Error('Unauthorized'); e.status = 403; throw e; }
+    if (req.receiver_id?.toString() !== user_id?.toString()) {
+      const e = new Error('Unauthorized'); e.status = 403; throw e;
+    }
     const chatId     = crypto.randomUUID();
     const expires_at = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString();
-    chats[chatId] = { id: chatId, user_a_id: req.sender_id, user_b_id: req.receiver_id, messages: [], expires_at, activity: req.activity };
+    chats[chatId] = {
+      id: chatId,
+      user_a_id:  req.sender_id?.toString(),
+      user_b_id:  req.receiver_id?.toString(),
+      expires_at,
+      activity:   req.activity,
+    };
     return CompanionModel.updateStatus(request_id, 'accepted', chatId);
   },
 
-  decline(request_id, user_id) {
-    const req = CompanionModel.findById(request_id);
-    if (!req || req.receiver_id !== user_id) { const e = new Error('Unauthorized'); e.status = 403; throw e; }
+  async decline(request_id, user_id) {
+    const req = await CompanionModel.findById(request_id);
+    if (!req || req.receiver_id?.toString() !== user_id?.toString()) {
+      const e = new Error('Unauthorized'); e.status = 403; throw e;
+    }
     return CompanionModel.updateStatus(request_id, 'declined');
   },
 
   getChat(chat_id, user_id) {
     const chat = chats[chat_id];
     if (!chat) { const e = new Error('Chat not found'); e.status = 404; throw e; }
-    if (chat.user_a_id !== user_id && chat.user_b_id !== user_id) { const e = new Error('Unauthorized'); e.status = 403; throw e; }
-    if (new Date(chat.expires_at) < new Date()) { const e = new Error('Chat expired'); e.status = 410; throw e; }
+    const uid = user_id?.toString();
+    if (chat.user_a_id !== uid && chat.user_b_id !== uid) {
+      const e = new Error('Unauthorized'); e.status = 403; throw e;
+    }
+    if (new Date(chat.expires_at) < new Date()) {
+      const e = new Error('Chat expired'); e.status = 410; throw e;
+    }
     return chat;
   },
 };

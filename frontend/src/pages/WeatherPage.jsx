@@ -72,7 +72,7 @@ export default function WeatherPage() {
   const [forecastScroll, setForecastScroll] = useState(0);
   const forecastRef = useRef(null);
 
-  const { suggestion, pending, activeChat, chatMinimized, loading: compLoading, findCompanion, nextCompanion, sendRequest, accept, decline, sendMessage, closeChat, reopenChat, dismissChat, hasActiveChat } = useCompanion(coords, !!user);
+  const { suggestion, pending, activeChat, loading: compLoading, findCompanion, sendRequest, accept, decline, sendMessage, closeChat } = useCompanion(coords, !!user);
 
   useEffect(() => { geolocate(); }, []);
 
@@ -383,7 +383,7 @@ export default function WeatherPage() {
                             <button className="comp-btn" onClick={handleSendCompanion} disabled={compLoading}>
                               {compLoading ? '...' : 'Send request →'}
                             </button>
-                            <button className="comp-btn refuse" onClick={nextCompanion}>{suggestion?.total > 1 ? `Next (${(suggestion.index ?? 0) + 1}/${suggestion.total})` : "Skip"}</button>
+                            <button className="comp-btn refuse" onClick={findCompanion}>Skip</button>
                           </div>
                         </div>
                       )}
@@ -411,7 +411,7 @@ export default function WeatherPage() {
 
       {/* CHAT */}
       {activeChat && (
-        <CompanionChat chat={activeChat} onSend={sendMessage} onClose={chatMinimized ? reopenChat : closeChat} onDismiss={dismissChat} minimized={chatMinimized} />
+        <CompanionChat chat={activeChat} onSend={sendMessage} onClose={closeChat} />
       )}
     </>
   );

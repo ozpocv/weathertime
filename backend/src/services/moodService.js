@@ -1,21 +1,23 @@
 const MoodModel = require('../models/moodModel');
 
 module.exports = {
-  publish({ user_id, mood, activity, status, lat, lng }) {
+  async publish({ user_id, username, mood, activity, status, lat, lng }) {
     const roundedLat = Math.round(lat * 200) / 200;
     const roundedLng = Math.round(lng * 200) / 200;
-    const expires_at = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString();
-    return MoodModel.create({ user_id, mood, activity, status, lat: roundedLat, lng: roundedLng, expires_at });
+    const expires_at = new Date(Date.now() + 4 * 60 * 60 * 1000);
+    return MoodModel.create({ user_id, username, mood, activity, status, lat: roundedLat, lng: roundedLng, expires_at });
   },
-  getNearby({ lat, lng, radiusKm, excludeUserId }) {
-    return MoodModel.findNearby({ lat, lng, radiusKm, excludeUserId }).map(r => ({
-      id: r.id, user_id: r.user_id, username: r.username, avatar_url: r.avatar_url,
+  async getNearby({ lat, lng, radiusKm, excludeUserId }) {
+    const rows = await MoodModel.findNearby({ lat, lng, radiusKm, excludeUserId });
+    return rows.map(r => ({
+      id: r._id || r.id, user_id: r.user_id, username: r.username,
       mood: r.mood, activity: r.activity, status: r.status,
       distance_km: Math.round(r.distance_km * 10) / 10,
     }));
   },
-  getMyMood: user_id => MoodModel.findByUser(user_id),
-  delete(id, user_id) {
-    if (!MoodModel.delete(id, user_id)) { const e = new Error('Mood not found'); e.status = 404; throw e; }
+  async getMyMood(user_id) { return MoodModel.findByUser(user_id); },
+  async delete(id, user_id) {
+    const deleted = await MoodModel.delete(id, user_id);
+    if (!deleted) { const e = new Error('Mood not found'); e.status = 404; throw e; }
   },
 };
