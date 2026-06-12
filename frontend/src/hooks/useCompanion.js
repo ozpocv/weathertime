@@ -9,15 +9,21 @@ export function useCompanion(coords, isLoggedIn) {
   const [loading,    setLoading]    = useState(false);
   const pollRef = useRef(null);
 
-  const findCompanion = useCallback(async () => {
+  const findCompanion = useCallback(async (index = 0) => {
     if (!isLoggedIn || !coords?.lat) return;
     setLoading(true);
     try {
-      const result = await api.findCompanion(coords.lat, coords.lng);
+      const result = await api.findCompanion(coords.lat, coords.lng, index);
       setSuggestion(result);
     } catch {}
     finally { setLoading(false); }
   }, [coords, isLoggedIn]);
+
+  const nextCompanion = useCallback(() => {
+    if (!suggestion) return;
+    const nextIndex = ((suggestion.index ?? 0) + 1) % (suggestion.total ?? 1);
+    findCompanion(nextIndex);
+  }, [suggestion, findCompanion]);
 
   const loadPending = useCallback(async () => {
     if (!isLoggedIn) return;
@@ -67,15 +73,37 @@ export function useCompanion(coords, isLoggedIn) {
   useEffect(() => {
     if (!isLoggedIn) return;
     loadPending();
+    pollRef.current = setInterval(loadPending, 10000);
+
+    const onFocus = () => loadPending();
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) loadPending();
+    });
+
     const socket = getSocket();
-    if (socket) socket.on('companion_request', req => setPending(p => [...p, req]));
-    pollRef.current = setInterval(loadPending, 15000);
+    if (socket) {
+      socket.on('companion_request', req => setPending(p => [...p, req]));
+
+      // ← C'EST ÇA QUI MANQUAIT
+      socket.on('companion_accepted', ({ chat_id, activity, partner_name }) => {
+        openChat(chat_id, partner_name, activity);
+      });
+    }
+
     return () => {
       clearInterval(pollRef.current);
+      window.removeEventListener('focus', onFocus);
       socket?.off('companion_request');
+      socket?.off('companion_accepted');
       socket?.off('new_message');
     };
   }, [isLoggedIn, loadPending]);
 
-  return { suggestion, pending, activeChat, loading, findCompanion, sendRequest, accept, decline, sendMessage, closeChat };
+  return {
+    suggestion, pending, activeChat, loading,
+    findCompanion, nextCompanion,
+    sendRequest, accept, decline,
+    sendMessage, closeChat,
+  };
 }
