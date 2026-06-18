@@ -30,8 +30,8 @@ export function useCompanion(coords, isLoggedIn) {
     try { setPending(await api.getPendingCompanions()); } catch {}
   }, [isLoggedIn]);
 
-  const sendRequest = useCallback(async (receiver_id, activity, mood) => {
-    await api.sendCompanionReq({ receiver_id, activity, mood });
+  const sendRequest = useCallback(async (receiver_id,sender_id, activity, mood) => {
+    await api.sendCompanionReq({ receiver_id, sender_id, activity, mood });
     setSuggestion(null);
   }, []);
 
