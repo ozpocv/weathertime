@@ -30,20 +30,21 @@ export function useCompanion(coords, isLoggedIn) {
     try { setPending(await api.getPendingCompanions()); } catch {}
   }, [isLoggedIn]);
 
-  const sendRequest = useCallback(async (receiver_id,sender_id, activity, mood) => {
-    await api.sendCompanionReq({ receiver_id, sender_id, activity, mood });
+  // FIX: suppression du paramètre sender_id en trop
+  const sendRequest = useCallback(async (receiver_id, activity, mood) => {
+    await api.sendCompanionReq({ receiver_id, activity, mood });
     setSuggestion(null);
   }, []);
 
   const accept = useCallback(async (request_id, partnerName, activity) => {
     const result = await api.acceptCompanion(request_id);
-    setPending(p => p.filter(r => r.id !== request_id));
+    setPending(p => p.filter(r => r.id !== request_id && r._id?.toString() !== request_id));
     if (result.chat_id) openChat(result.chat_id, partnerName, activity);
   }, []);
 
   const decline = useCallback(async (request_id) => {
     await api.declineCompanion(request_id);
-    setPending(p => p.filter(r => r.id !== request_id));
+    setPending(p => p.filter(r => r.id !== request_id && r._id?.toString() !== request_id));
   }, []);
 
   function openChat(chatId, partnerName, activity) {
@@ -84,8 +85,6 @@ export function useCompanion(coords, isLoggedIn) {
     const socket = getSocket();
     if (socket) {
       socket.on('companion_request', req => setPending(p => [...p, req]));
-
-      // ← C'EST ÇA QUI MANQUAIT
       socket.on('companion_accepted', ({ chat_id, activity, partner_name }) => {
         openChat(chat_id, partner_name, activity);
       });
