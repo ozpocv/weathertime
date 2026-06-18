@@ -132,6 +132,7 @@ export default function WeatherPage() {
     if (!suggestion) return;
     const activity = getCommonActivity(selMood || 'chill', suggestion.mood);
     const receiverId = suggestion.user_id?._id?.toString() || suggestion.user_id?.toString() || suggestion.user_id;
+    console.log('sendRequest:', { receiverId, activity, mood: selMood });
     await sendRequest(receiverId, activity, selMood || 'chill');
   }
 
